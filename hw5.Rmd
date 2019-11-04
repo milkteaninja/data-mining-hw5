@@ -1,0 +1,176 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+devtools::install_github("rstudio/reticulate",force = TRUE)
+devtools::install_github("rstudio/tensorflow",force = TRUE)
+devtools::install_github("rstudio/keras")
+# 
+# library(reticulate)
+# use_python("C:/Users/zhang/Miniconda2")
+# install.packages("tensorflow")
+# install.packages("keras")
+
+tensorflow::install_tensorflow()
+keras::install_keras()
+
+library(keras)
+library(tidyverse)
+library(dplyr)
+```
+
+Identify the catrgorical variables. One-hot encode your lists to turn them into vectors of 0s and 1s. 
+```{r}
+library(MASS)
+
+#create new dummy variables
+head(Boston)
+#chase and rad
+Boston$chas<- factor(Boston$chas)
+Boston$chas<- factor(Boston$rad)
+dummy<- model.matrix(~.,data=Boston)
+data1<- dummy[,-1] #21 vairables
+variables<- names(data.frame(data1))
+
+xvariables<- dummy[,-c(1,21)]
+yvariable<- dummy[,21]
+```
+
+Use the caret package to tune the parameters. one-hidden-layer neural network. Number of nodes in the hidden layer (size), the dropout rate (dropout), the training batch size (batch_size), the learning rate (lr) and the activation function.
+
+The tuning results are listed below:
+number of nodes: 4
+activation function: tanh
+batch size: 128
+learning rate: 1e-06
+dropout rate: 1
+
+```{r}
+
+#install.packages('caret', dependencies = TRUE)
+library(caret)
+#10-fold CV
+set.seed(8888)
+## 10-fold CV
+caret_control <- trainControl(
+                           method = "cv",
+                           number = 1
+                           )
+
+
+#tunegrid,fix some of the tuning parameter while changing the others and choose the best
+
+#tune number of nodes in the hidden layer and activation function at the same time 
+size_grid <- expand.grid(batch_size=64,
+                          dropout=0.1,
+                          # size=1:20,
+                          size=2,
+                          lr=0.00001,
+                          rho=1,
+                          decay=0,
+                          activation = c("relu","sigmoid","tanh")
+                          )
+
+size_select <- train(medv ~., data = data1, 
+                 method = "mlpKerasDropout", 
+                 trControl = caret_control, 
+                 tuneGrid = size_grid,
+                 verbose = FALSE,
+                 metric="MSE"
+                 )
+    
+
+
+#tune batch size & learning rate
+batch_grid <- expand.grid(batch_size=c(32,64,128),
+                          dropout=0.1,
+                          size=4,
+                          lr=c(0.000001,0.00001,0.0001, 0.001, 0.01, 0.1, 0.2, 0.3),
+                          rho=1,
+                          decay=0,
+                          activation = "tanh"
+                          )
+
+batch_select <- train(medv ~ ., data = data1, 
+                 method = "mlpKerasDropout", 
+                 trControl = caret_control, 
+                 tuneGrid = batch_grid,
+                 verbose = FALSE,
+                 metric="MSE"
+                 )
+
+
+#tune dropout rate
+dropout_grid <- expand.grid(batch_size=128,
+                          dropout=seq(0,1,0.1),
+                          size=4,
+                          lr=1e-06,
+                          rho=1,
+                          decay=0,
+                          activation = "tanh"
+                          )
+
+dropout_select <- train(medv ~ ., data = data1, 
+                 method = "mlpKerasDropout", 
+                 trControl = caret_control, 
+                 tuneGrid = dropout_grid,
+                 verbose = FALSE,
+                 metric="MSE"
+                 )
+
+
+```
+
+Fit the model with the best parameters using Keras.
+
+number of nodesin the layer: 4
+activation function: tanh
+batch size: 128
+learning rate: 1e-06
+dropout rate: 1
+
+
+
+```{r}
+model <- keras_model_sequential() %>% 
+layer_dense(units = 4, activation = "tanh",nput_shape = c(20)) %>%  
+  layer_dropout(rate = 1) %>%  
+  layer_dense(units = 1) 
+  model %>% compile(     
+    loss = "mse",     
+    optimizer = optimizer_rmsprop(lr = 1e-06),  
+    metrics = list("mean_absolute_error")  
+    )
+  
+model %>% fit(
+  xvariables,
+  yvariable,
+  epochs = 100, 
+  batch_size = 128,
+  validation_split = 0.2,   
+  verbose = 0 )
+```
+
+Obtain the predictions.Plot the prediction with respect to each variable. My preditction is kind of wierd here since the value is negative. Which variables seem to have on-linear effects? The graph shows that most of the variables have non-linear effetcs. 
+
+```{r}
+predictions <- model %>% predict(xvariables)
+pred<- predictions[,1]
+ 
+library(ggplot2) 
+plot(history, metrics = "mean_absolute_error", smooth = FALSE) +   coord_cartesian(ylim = c(0, 20))
+
+
+for( variables in data.frame(data1)){   
+  names<- names(data)  
+  count<- count+1  
+  variables_name=names[count]
+  plot(variables,pred,xlab=variables_name) 
+  }
+
+```
+
